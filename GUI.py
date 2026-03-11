@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import json
 import threading
 import time
@@ -5,11 +6,16 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
-from scripts.mock_dependency_manager import (
-    build_mock_steps,
-    build_report,
-    default_dependencies,
-)
+try:
+    from scripts.mock_dependency_manager import (
+        build_mock_steps,
+        build_report,
+        default_dependencies,
+    )
+except ImportError:
+    build_mock_steps = None
+    build_report = None
+    default_dependencies = lambda: []
 
 
 class TicketHelperGUI:
@@ -18,9 +24,13 @@ class TicketHelperGUI:
         self.window.title("抢票助手 V5.0")
         self.window.geometry("1280x900")
         self.window.config(bg="#e3f2fd")
-        self.window.resizable(False, False)
+        self.window.resizable(True, True)
 
         self.style = ttk.Style()
+        try:
+            self.style.theme_use("clam")
+        except:
+            pass
         self.style.configure(
             "TButton",
             font=("Arial", 12),
@@ -30,6 +40,24 @@ class TicketHelperGUI:
             foreground="white",
         )
         self.style.map("TButton", background=[("active", "#2980b9")])
+        self.style.configure(
+            "Danger.TButton",
+            font=("Arial", 12),
+            padding=8,
+            relief="flat",
+            background="#e74c3c",
+            foreground="white",
+        )
+        self.style.map("Danger.TButton", background=[("active", "#c0392b")])
+        self.style.configure(
+            "Warning.TButton",
+            font=("Arial", 12),
+            padding=8,
+            relief="flat",
+            background="#f39c12",
+            foreground="white",
+        )
+        self.style.map("Warning.TButton", background=[("active", "#d68910")])
         self.style.configure("TCheckbutton", font=("Arial", 11), foreground="#333")
         self.style.configure("TLabel", font=("Arial", 11), foreground="#333")
         self.style.configure("TLabelframe.Label", font=("Arial", 12, "bold"))
@@ -54,11 +82,25 @@ class TicketHelperGUI:
         self.window.config(menu=menu_bar)
 
     def create_widgets(self):
-        main_frame = tk.Frame(self.window, bg="#e3f2fd")
-        main_frame.place(relwidth=1, relheight=1)
+        self.canvas = tk.Canvas(self.window, bg="#e3f2fd", highlightthickness=0)
+        self.scrollbar = ttk.Scrollbar(self.window, orient="vertical", command=self.canvas.yview)
+        self.scrollable_frame = tk.Frame(self.canvas, bg="#e3f2fd")
+
+        self.scrollable_frame.bind(
+            "<Configure>",
+            lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+        )
+
+        self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
+        self.canvas.configure(yscrollcommand=self.scrollbar.set)
+
+        self.canvas.pack(side="left", fill="both", expand=True)
+        self.scrollbar.pack(side="right", fill="y")
+
+        self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
 
         title = ttk.Label(
-            main_frame,
+            self.scrollable_frame,
             text="抢票助手配置中心",
             font=("Arial", 26, "bold"),
             foreground="#2c3e50",
@@ -66,7 +108,7 @@ class TicketHelperGUI:
         )
         title.pack(pady=20)
 
-        self.notebook = ttk.Notebook(main_frame)
+        self.notebook = ttk.Notebook(self.scrollable_frame)
         self.notebook.pack(padx=20, pady=10, fill=tk.BOTH, expand=True)
 
         self.create_global_tab()
@@ -78,7 +120,7 @@ class TicketHelperGUI:
         self.create_dependency_tab()
 
         control_frame = tk.LabelFrame(
-            main_frame,
+            self.scrollable_frame,
             text="任务控制",
             font=("Arial", 12),
             bg="#ffffff",
@@ -87,6 +129,9 @@ class TicketHelperGUI:
             pady=10,
         )
         control_frame.pack(fill=tk.X, padx=20, pady=5)
+        control_frame.columnconfigure(1, weight=1)
+        control_frame.columnconfigure(2, weight=1)
+        control_frame.columnconfigure(3, weight=1)
 
         self.auto_buy_check_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(
@@ -96,24 +141,27 @@ class TicketHelperGUI:
         ).grid(row=0, column=0, padx=10, pady=5, sticky="w")
 
         self.start_button = ttk.Button(control_frame, text="开始抢票", command=self.start_ticket_task)
-        self.start_button.grid(row=0, column=1, padx=10)
+        self.start_button.grid(row=0, column=1, padx=10, sticky="ew")
         self.stop_button = ttk.Button(
             control_frame,
             text="停止任务",
             command=self.stop_ticket_task,
             state=tk.DISABLED,
+            style="Danger.TButton",
         )
-        self.stop_button.grid(row=0, column=2, padx=10)
+        self.stop_button.grid(row=0, column=2, padx=10, sticky="ew")
         self.restart_button = ttk.Button(
             control_frame,
             text="重试任务",
             command=self.retry_ticket_task,
             state=tk.DISABLED,
+            style="Warning.TButton",
         )
-        self.restart_button.grid(row=0, column=3, padx=10)
+        self.restart_button.grid(row=0, column=3, padx=10, sticky="ew")
 
-        status_frame = tk.Frame(main_frame, bg="#e3f2fd")
+        status_frame = tk.Frame(self.scrollable_frame, bg="#e3f2fd")
         status_frame.pack(fill=tk.X, padx=20, pady=5)
+        status_frame.columnconfigure(1, weight=1)
 
         self.status_label = ttk.Label(
             status_frame,
@@ -122,10 +170,10 @@ class TicketHelperGUI:
             background="#e3f2fd",
             foreground="#2c3e50",
         )
-        self.status_label.grid(row=0, column=0, padx=10)
+        self.status_label.grid(row=0, column=0, padx=10, sticky="w")
 
-        self.progress_bar = ttk.Progressbar(status_frame, length=240, mode="determinate", maximum=100)
-        self.progress_bar.grid(row=0, column=1, padx=10)
+        self.progress_bar = ttk.Progressbar(status_frame, mode="determinate", maximum=100)
+        self.progress_bar.grid(row=0, column=1, padx=10, sticky="ew")
 
         self.progress_label = ttk.Label(
             status_frame,
@@ -134,10 +182,10 @@ class TicketHelperGUI:
             background="#e3f2fd",
             foreground="#2c3e50",
         )
-        self.progress_label.grid(row=0, column=2, padx=10)
+        self.progress_label.grid(row=0, column=2, padx=10, sticky="w")
 
         log_frame = tk.LabelFrame(
-            main_frame,
+            self.scrollable_frame,
             text="日志输出",
             font=("Arial", 12),
             bg="#ffffff",
@@ -146,33 +194,42 @@ class TicketHelperGUI:
             pady=10,
         )
         log_frame.pack(fill=tk.BOTH, padx=20, pady=10)
+        log_frame.columnconfigure(0, weight=1)
 
         self.log_text = tk.Text(
             log_frame,
             height=8,
-            width=120,
             font=("Arial", 11),
             wrap=tk.WORD,
             bg="#f8f9fa",
             state=tk.DISABLED,
         )
-        self.log_text.grid(row=0, column=0, padx=10, pady=5)
+        self.log_text.grid(row=0, column=0, padx=10, pady=5, sticky="ew")
+
+        log_button_frame = tk.Frame(log_frame, bg="#ffffff")
+        log_button_frame.grid(row=1, column=0, padx=10, pady=5, sticky="e")
+
+        clear_log_button = ttk.Button(log_button_frame, text="清空日志", command=self.clear_log)
+        clear_log_button.pack(side=tk.RIGHT)
 
     def create_global_tab(self):
         tab = tk.Frame(self.notebook, bg="#ffffff")
         self.notebook.add(tab, text="全局设置")
 
+        content = self._create_scrollable_frame(tab)
+        content.columnconfigure(1, weight=1)
+
         self.global_log_level = self._add_labeled_combo(
-            tab,
+            content,
             0,
             "日志等级",
             ["DEBUG", "INFO", "WARNING", "ERROR"],
             default="DEBUG",
         )
-        self.global_timezone = self._add_labeled_entry(tab, 1, "时区", "Asia/Shanghai")
-        self.global_ntp_servers = self._add_labeled_entry(tab, 2, "NTP服务器(逗号分隔)", "time.google.com,ntp.aliyun.com")
+        self.global_timezone = self._add_labeled_entry(content, 1, "时区", "Asia/Shanghai")
+        self.global_ntp_servers = self._add_labeled_entry(content, 2, "NTP服务器(逗号分隔)", "time.google.com,ntp.aliyun.com")
 
-        dashboard_frame = tk.LabelFrame(tab, text="Dashboard", bg="#ffffff", padx=10, pady=10)
+        dashboard_frame = tk.LabelFrame(content, text="Dashboard", bg="#ffffff", padx=10, pady=10)
         dashboard_frame.grid(row=3, column=0, columnspan=2, sticky="ew", padx=10, pady=10)
         dashboard_frame.columnconfigure(1, weight=1)
 
@@ -187,18 +244,21 @@ class TicketHelperGUI:
         tab = tk.Frame(self.notebook, bg="#ffffff")
         self.notebook.add(tab, text="账户配置")
 
+        content = self._create_scrollable_frame(tab)
+        content.columnconfigure(1, weight=1)
+
         self.account_platform = self._add_labeled_combo(
-            tab,
+            content,
             0,
             "平台",
             ["taopiaopiao", "maoyan", "showstart", "piaoxingqiu", "others"],
             default="taopiaopiao",
         )
-        self.account_mobile = self._add_labeled_entry(tab, 1, "手机号", "")
-        self.account_password = self._add_labeled_entry(tab, 2, "密码", "")
-        self.account_otp = self._add_labeled_entry(tab, 3, "OTP Secret(可选)", "")
+        self.account_mobile = self._add_labeled_entry(content, 1, "手机号", "")
+        self.account_password = self._add_labeled_entry(content, 2, "密码", "")
+        self.account_otp = self._add_labeled_entry(content, 3, "OTP Secret(可选)", "")
 
-        target_frame = tk.LabelFrame(tab, text="目标信息", bg="#ffffff", padx=10, pady=10)
+        target_frame = tk.LabelFrame(content, text="目标信息", bg="#ffffff", padx=10, pady=10)
         target_frame.grid(row=4, column=0, columnspan=2, sticky="ew", padx=10, pady=10)
         target_frame.columnconfigure(1, weight=1)
 
@@ -215,7 +275,7 @@ class TicketHelperGUI:
         self.target_tickets = self._add_labeled_entry(target_frame, 4, "购票数量", "2")
         self.target_viewers = self._add_labeled_entry(target_frame, 5, "观影人索引(逗号)", "0,1")
 
-        proxy_frame = tk.LabelFrame(tab, text="代理设置", bg="#ffffff", padx=10, pady=10)
+        proxy_frame = tk.LabelFrame(content, text="代理设置", bg="#ffffff", padx=10, pady=10)
         proxy_frame.grid(row=5, column=0, columnspan=2, sticky="ew", padx=10, pady=10)
         proxy_frame.columnconfigure(1, weight=1)
 
@@ -233,21 +293,24 @@ class TicketHelperGUI:
         tab = tk.Frame(self.notebook, bg="#ffffff")
         self.notebook.add(tab, text="策略设置")
 
+        content = self._create_scrollable_frame(tab)
+        content.columnconfigure(1, weight=1)
+
         self.strategy_auto = tk.BooleanVar(value=True)
-        ttk.Checkbutton(tab, text="启用自动出手", variable=self.strategy_auto, background="#ffffff").grid(
+        ttk.Checkbutton(content, text="启用自动出手", variable=self.strategy_auto).grid(
             row=0, column=0, sticky="w", padx=10, pady=5
         )
-        self.strategy_time = self._add_labeled_entry(tab, 1, "开抢时间(ISO)", "2026-01-25T12:00:00")
-        self.strategy_preheat = self._add_labeled_entry(tab, 2, "预热阶段(秒,逗号)", "5.0,2.0,0.5")
+        self.strategy_time = self._add_labeled_entry(content, 1, "开抢时间(ISO)", "2026-01-25T12:00:00")
+        self.strategy_preheat = self._add_labeled_entry(content, 2, "预热阶段(秒,逗号)", "5.0,2.0,0.5")
 
         self.strategy_ai = tk.BooleanVar(value=True)
-        ttk.Checkbutton(tab, text="启用AI决策", variable=self.strategy_ai, background="#ffffff").grid(
+        ttk.Checkbutton(content, text="启用AI决策", variable=self.strategy_ai).grid(
             row=3, column=0, sticky="w", padx=10, pady=5
         )
-        self.strategy_ai_model = self._add_labeled_entry(tab, 4, "AI模型路径", "models/lstm_onnx.onnx")
-        self.strategy_max_retries = self._add_labeled_entry(tab, 5, "最大重试次数", "180")
+        self.strategy_ai_model = self._add_labeled_entry(content, 4, "AI模型路径", "models/lstm_onnx.onnx")
+        self.strategy_max_retries = self._add_labeled_entry(content, 5, "最大重试次数", "180")
         self.strategy_retry_backoff = self._add_labeled_combo(
-            tab,
+            content,
             6,
             "重试策略",
             ["exponential", "fixed"],
@@ -258,13 +321,16 @@ class TicketHelperGUI:
         tab = tk.Frame(self.notebook, bg="#ffffff")
         self.notebook.add(tab, text="监控设置")
 
+        content = self._create_scrollable_frame(tab)
+        content.columnconfigure(1, weight=1)
+
         self.monitor_enable = tk.BooleanVar(value=True)
-        ttk.Checkbutton(tab, text="启用库存监控", variable=self.monitor_enable, background="#ffffff").grid(
+        ttk.Checkbutton(content, text="启用库存监控", variable=self.monitor_enable).grid(
             row=0, column=0, sticky="w", padx=10, pady=5
         )
-        self.monitor_poll_interval = self._add_labeled_entry(tab, 1, "轮询间隔(秒)", "1.5")
+        self.monitor_poll_interval = self._add_labeled_entry(content, 1, "轮询间隔(秒)", "1.5")
 
-        trigger_frame = tk.LabelFrame(tab, text="触发条件(每行一条)", bg="#ffffff", padx=10, pady=10)
+        trigger_frame = tk.LabelFrame(content, text="触发条件(每行一条)", bg="#ffffff", padx=10, pady=10)
         trigger_frame.grid(row=2, column=0, columnspan=2, sticky="ew", padx=10, pady=10)
         self.monitor_triggers = tk.Text(trigger_frame, height=5, width=60, font=("Arial", 10))
         self.monitor_triggers.insert(tk.END, "price_drop > 10%\ntickets_added > 0\nstatus_change: soldout -> available")
@@ -274,14 +340,17 @@ class TicketHelperGUI:
         tab = tk.Frame(self.notebook, bg="#ffffff")
         self.notebook.add(tab, text="通知设置")
 
-        telegram_frame = tk.LabelFrame(tab, text="Telegram", bg="#ffffff", padx=10, pady=10)
+        content = self._create_scrollable_frame(tab)
+        content.columnconfigure(1, weight=1)
+
+        telegram_frame = tk.LabelFrame(content, text="Telegram", bg="#ffffff", padx=10, pady=10)
         telegram_frame.grid(row=0, column=0, columnspan=2, sticky="ew", padx=10, pady=10)
         telegram_frame.columnconfigure(1, weight=1)
 
         self.telegram_token = self._add_labeled_entry(telegram_frame, 0, "Bot Token", "")
         self.telegram_chat = self._add_labeled_entry(telegram_frame, 1, "Chat ID", "")
 
-        email_frame = tk.LabelFrame(tab, text="Email", bg="#ffffff", padx=10, pady=10)
+        email_frame = tk.LabelFrame(content, text="Email", bg="#ffffff", padx=10, pady=10)
         email_frame.grid(row=1, column=0, columnspan=2, sticky="ew", padx=10, pady=10)
         email_frame.columnconfigure(1, weight=1)
 
@@ -294,10 +363,13 @@ class TicketHelperGUI:
         tab = tk.Frame(self.notebook, bg="#ffffff")
         self.notebook.add(tab, text="插件扩展")
 
-        ttk.Label(tab, text="自定义插件(逗号分隔)", background="#ffffff").grid(
+        content = self._create_scrollable_frame(tab)
+        content.columnconfigure(1, weight=1)
+
+        ttk.Label(content, text="自定义插件(逗号分隔)", background="#ffffff").grid(
             row=0, column=0, padx=10, pady=10, sticky="w"
         )
-        self.plugins_custom = ttk.Entry(tab, width=60, font=("Arial", 11))
+        self.plugins_custom = ttk.Entry(content, width=60, font=("Arial", 11))
         self.plugins_custom.insert(0, "my_adapter.py,extra_notifier.py")
         self.plugins_custom.grid(row=0, column=1, padx=10, pady=10, sticky="ew")
 
@@ -305,15 +377,18 @@ class TicketHelperGUI:
         tab = tk.Frame(self.notebook, bg="#ffffff")
         self.notebook.add(tab, text="依赖管理")
 
+        content = self._create_scrollable_frame(tab)
+        content.columnconfigure(1, weight=1)
+
         description = (
-            "本项目用于模拟与学习。可在此配置“伪安装”依赖清单，\n"
+            "本项目用于模拟与学习。可在此配置\"伪安装\"依赖清单，\n"
             "点击按钮将以日志方式模拟安装流程，不会真实下载或执行安装。"
         )
-        ttk.Label(tab, text=description, background="#ffffff", foreground="#555").grid(
+        ttk.Label(content, text=description, background="#ffffff", foreground="#555").grid(
             row=0, column=0, columnspan=2, padx=10, pady=10, sticky="w"
         )
 
-        deps_frame = tk.LabelFrame(tab, text="依赖清单(每行一条)", bg="#ffffff", padx=10, pady=10)
+        deps_frame = tk.LabelFrame(content, text="依赖清单(每行一条)", bg="#ffffff", padx=10, pady=10)
         deps_frame.grid(row=1, column=0, columnspan=2, sticky="ew", padx=10, pady=10)
         self.dependency_list = tk.Text(deps_frame, height=8, width=70, font=("Arial", 10))
         self.dependency_list.insert(tk.END, "\n".join(default_dependencies()) + "\n")
@@ -321,16 +396,15 @@ class TicketHelperGUI:
 
         self.dep_auto_install = tk.BooleanVar(value=True)
         ttk.Checkbutton(
-            tab,
+            content,
             text="启动时自动模拟安装",
             variable=self.dep_auto_install,
-            background="#ffffff",
         ).grid(row=2, column=0, padx=10, pady=5, sticky="w")
 
-        install_button = ttk.Button(tab, text="模拟安装依赖", command=self.simulate_dependency_install)
+        install_button = ttk.Button(content, text="模拟安装依赖", command=self.simulate_dependency_install)
         install_button.grid(row=2, column=1, padx=10, pady=5, sticky="e")
 
-        export_button = ttk.Button(tab, text="导出模拟安装报告", command=self.export_dependency_report)
+        export_button = ttk.Button(content, text="导出模拟安装报告", command=self.export_dependency_report)
         export_button.grid(row=3, column=1, padx=10, pady=5, sticky="e")
 
     def _add_labeled_entry(self, parent, row, label, default):
@@ -342,6 +416,27 @@ class TicketHelperGUI:
         if default:
             entry.insert(0, default)
         return entry
+
+    def _create_scrollable_frame(self, parent):
+        canvas = tk.Canvas(parent, bg="#ffffff", highlightthickness=0)
+        scrollbar = ttk.Scrollbar(parent, orient="vertical", command=canvas.yview)
+        scrollable_frame = tk.Frame(canvas, bg="#ffffff")
+
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        return scrollable_frame
+
+    def _on_mousewheel(self, event):
+        self.canvas.yview_scroll(int(-1*(event.delta/120)), "units")
 
     def _add_labeled_combo(self, parent, row, label, values, default=None):
         ttk.Label(parent, text=label, background=parent.cget("bg")).grid(
@@ -392,7 +487,7 @@ class TicketHelperGUI:
         for i in range(1, 101):
             time.sleep(0.08)
             self.progress_bar["value"] = i
-            self.progress_label.config(text=f"进度: {i}%")
+            self.progress_label.config(text="进度: {}%".format(i))
             self.window.update_idletasks()
 
         self.log("任务完成！")
@@ -406,6 +501,9 @@ class TicketHelperGUI:
         if not dependencies:
             self.log("依赖清单为空，已跳过。")
             return
+        if not build_mock_steps:
+            self.log("依赖模拟功能不可用。")
+            return
         self.log("开始模拟安装依赖...")
         for step in build_mock_steps(dependencies):
             time.sleep(0.03)
@@ -417,6 +515,11 @@ class TicketHelperGUI:
         self.log_text.insert(tk.END, f"{message}\n")
         self.log_text.config(state=tk.DISABLED)
         self.log_text.yview(tk.END)
+
+    def clear_log(self):
+        self.log_text.config(state=tk.NORMAL)
+        self.log_text.delete("1.0", tk.END)
+        self.log_text.config(state=tk.DISABLED)
 
     def save_config(self):
         config_data = {
@@ -639,6 +742,9 @@ class TicketHelperGUI:
             initialfile="mock_install_report.txt",
         )
         if not file_path:
+            return
+        if not build_report:
+            messagebox.showerror("错误", "报告生成功能不可用。")
             return
         report = build_report(dependencies)
         try:

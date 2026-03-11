@@ -10,6 +10,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
+from selenium.webdriver.chrome.service import Service
 
 
 class Concert(object):
@@ -80,7 +81,7 @@ class Concert(object):
     def enter_concert(self):
         print(u'###打开浏览器，进入大麦网###')
         if not exists('cookies.pkl'):   # 如果不存在cookie.pkl,就获取一下
-            self.driver = webdriver.Chrome(executable_path=self.driver_path)
+            self.driver = webdriver.Chrome(service=Service(self.driver_path))
             self.get_cookie()
             print(u'###成功获取Cookie，重启浏览器###')
             self.driver.quit()
@@ -93,15 +94,19 @@ class Concert(object):
         mobile_emulation = {"deviceName": "Nexus 6"}
         options.add_experimental_option("prefs", prefs)
         options.add_experimental_option("mobileEmulation", mobile_emulation)
-        # 就是这一行告诉chrome去掉了webdriver痕迹，令navigator.webdriver=false，极其关键
         options.add_argument("--disable-blink-features=AutomationControlled")
+        options.add_argument('--disable-gpu')
+        options.add_argument('--no-sandbox')
+        options.add_argument('--disable-dev-shm-usage')
+        options.add_argument('--disable-blink-features=AutomationControlled')
+        options.add_experimental_option('excludeSwitches', ['enable-automation'])
+        options.add_experimental_option('useAutomationExtension', False)
 
-        # 更换等待策略为不等待浏览器加载完全就进行下一步操作
-        capa = DesiredCapabilities.CHROME
-        # normal, eager, none
-        capa["pageLoadStrategy"] = "eager"
+        options.page_load_strategy = 'normal'
         self.driver = webdriver.Chrome(
-            executable_path=self.driver_path, options=options, desired_capabilities=capa)
+            service=Service(self.driver_path), options=options)
+        
+        self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
         # 登录到具体抢购页面
         self.login()
         self.driver.refresh()
@@ -138,10 +143,25 @@ class Concert(object):
 
             # 确认页面刷新成功
             try:
-                box = WebDriverWait(self.driver, 3, 0.1).until(
+                box = WebDriverWait(self.driver, 5, 0.5).until(
                     EC.presence_of_element_located((By.ID, 'app')))
             except:
-                raise Exception(u"***Error: 页面刷新出错***")
+                try:
+                    box = WebDriverWait(self.driver, 5, 0.5).until(
+                        EC.presence_of_element_located((By.TAG_NAME, 'body')))
+                except:
+                    print("当前页面标题: {}".format(self.driver.title))
+                    print("当前页面URL: {}".format(self.driver.current_url))
+                    raise Exception(u"***Error: 页面刷新出错***")
+
+            try:
+                health_info_popup = box.find_elements(
+                    by=By.CLASS_NAME, value='health-info-button')
+                if len(health_info_popup) != 0:
+                    health_info_popup[0].click()
+                    print(u"###已点击健康信息确认弹窗###")
+            except:
+                pass
 
             try:
                 realname_popup = box.find_elements(
@@ -156,9 +176,9 @@ class Concert(object):
             try:
                 buybutton = box.find_element(by=By.CLASS_NAME, value='buy__button')
                 sleep(0.5)
-                buybutton_text: str = buybutton.text
+                buybutton_text = str(buybutton.text)
             except Exception as e:
-                raise Exception(f"***Error: buybutton 位置找不到***: {e}")
+                raise Exception("***Error: buybutton 位置找不到***: {}".format(e))
 
             if "即将开抢" in buybutton_text:
                 self.status = 2
@@ -184,7 +204,7 @@ class Concert(object):
                     date_list = date.find_elements(
                         by=By.CLASS_NAME, value='bui-calendar-day-box')
                     for i in self.date:
-                        j: WebElement = date_list[i-1]
+                        j = date_list[i-1]
                         toBeClicks.append(j)
                         break
                     for i in toBeClicks:
@@ -201,7 +221,7 @@ class Concert(object):
                 for i in self.session:  # 根据优先级选择一个可行场次
                     if i > len(session_list):
                         i = len(session_list)
-                    j: WebElement = session_list[i-1]
+                    j = session_list[i-1]
                     # TODO 不确定已满的场次带的是什么Tag
                     
                     k = self.isClassPresent(j, 'item-tag', True)
@@ -262,7 +282,7 @@ class Concert(object):
                     raise Exception(u"***购票按钮未开始***")
 
             except Exception as e:
-                raise Exception(f"***Error: 选择日期or场次or票档不成功***: {e}")
+                raise Exception("***Error: 选择日期or场次or票档不成功***: {}".format(e))
 
             try:
                 ticket_num_up = box.find_element(
@@ -287,7 +307,7 @@ class Concert(object):
                     EC.title_contains("确认"))
                 break
             else:
-                raise Exception(f"未定义按钮：{buybutton_text}")
+                raise Exception("未定义按钮：{}".format(buybutton_text))
 
     def check_order(self):
         if self.status in [3, 4, 5]:
